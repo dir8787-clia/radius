@@ -58,26 +58,29 @@ apt install -y apache2 mariadb-server php php-mysql php-gd php-xml php-mbstring 
 systemctl start mariadb
 systemctl enable mariadb
 
+# Генерация пароля для root в MariaDB
+MYSQL_ROOT_PASSWORD=$(generate_password)
+
 # Настройка безопасности MariaDB с помощью expect
 print_status "Настройка безопасности MariaDB..."
 expect <<EOF
 spawn mysql_secure_installation
 expect "Enter current password for root (enter for none):"
-send "\r"
+send "\\r"
 expect "Set root password?"
-send "y\r"
+send "y\\r"
 expect "New password:"
-send "$(generate_password)\r"
+send "$MYSQL_ROOT_PASSWORD\\r"
 expect "Re-enter new password:"
-send "$(generate_password)\r"
+send "$MYSQL_ROOT_PASSWORD\\r"
 expect "Remove anonymous users?"
-send "y\r"
+send "y\\r"
 expect "Disallow root login remotely?"
-send "y\r"
+send "y\\r"
 expect "Remove test database and access to it?"
-send "y\r"
+send "y\\r"
 expect "Reload privilege tables now?"
-send "y\r"
+send "y\\r"
 expect eof
 EOF
 
@@ -91,6 +94,7 @@ MYSQL_TMP_CONF="/tmp/.mysql_config.$$"
 cat > "$MYSQL_TMP_CONF" <<MYSQL_EOF
 [client]
 user=root
+password=$MYSQL_ROOT_PASSWORD
 host=localhost
 MYSQL_EOF
 
@@ -131,9 +135,18 @@ ln -s /etc/freeradius/3.0/mods-available/sql /etc/freeradius/3.0/mods-enabled/sq
 sed -i '/^.*sql$/ s/^/#/' /etc/freeradius/3.0/sites-available/default
 sed -i '/^#.*sql$/ s/^#//' /etc/freeradius/3.0/sites-available/default
 
+# Создание временного файла конфигурации для импорта схемы FreeRADIUS
+MYSQL_TMP_CONF_SCHEMA="/tmp/.mysql_config.$$"
+cat > "$MYSQL_TMP_CONF_SCHEMA" <<MYSQL_EOF
+[client]
+user=root
+password=$MYSQL_ROOT_PASSWORD
+host=localhost
+MYSQL_EOF
+
 # Импорт SQL схемы для FreeRADIUS
 print_status "Импорт SQL схемы FreeRADIUS..."
-mysql --defaults-extra-file="$MYSQL_TMP_CONF" radius < /etc/freeradius/3.0/mods-config/sql/main/mysql/schema.sql
+mysql --defaults-extra-file="$MYSQL_TMP_CONF_SCHEMA" radius < /etc/freeradius/3.0/mods-config/sql/main/mysql/schema.sql
 
 # Включение SQL accounting
 ln -s /etc/freeradius/3.0/mods-available/sqlcounter /etc/freeradius/3.0/mods-enabled/sqlcounter
@@ -159,8 +172,11 @@ sed -i "s/\$configValues\['CONFIG_DB_NAME'\] = 'radius';/\$configValues\['CONFIG
 
 # Импорт SQL схемы для daloRADIUS
 print_status "Импорт SQL схемы daloRADIUS..."
-mysql --defaults-extra-file="$MYSQL_TMP_CONF" daloradius < /var/www/html/daloradius/contrib/db/fr2-mysql-daloradius-and-freeradius.sql
-mysql --defaults-extra-file="$MYSQL_TMP_CONF" daloradius < /var/www/html/daloradius/contrib/db/mysql-daloradius.sql
+mysql --defaults-extra-file="$MYSQL_TMP_CONF_SCHEMA" daloradius < /var/www/html/daloradius/contrib/db/fr2-mysql-daloradius-and-freeradius.sql
+mysql --defaults-extra-file="$MYSQL_TMP_CONF_SCHEMA" daloradius < /var/www/html/daloradius/contrib/db/mysql-daloradius.sql
+
+# Удаление временного файла конфигурации
+rm -f "$MYSQL_TMP_CONF_SCHEMA"
 
 # Настройка Apache для daloRADIUS
 print_status "Настройка Apache для daloRADIUS..."
